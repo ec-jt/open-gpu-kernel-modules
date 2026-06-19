@@ -22,6 +22,39 @@
  */
 #include <linux/dma-buf.h>
 #include "nv-dmabuf.h"
+#include <linux/atomic.h>
+#include <linux/moduleparam.h>
+
+/* DMA-BUF checkpoint transport instrumentation (Track 4) */
+static atomic64_t nv_dmabuf_export_count = ATOMIC64_INIT(0);
+static atomic64_t nv_dmabuf_force_pcie_count = ATOMIC64_INIT(0);
+static atomic64_t nv_dmabuf_attach_count = ATOMIC64_INIT(0);
+static atomic64_t nv_dmabuf_map_pfns_count = ATOMIC64_INIT(0);
+static atomic64_t nv_dmabuf_map_pages_count = ATOMIC64_INIT(0);
+static atomic64_t nv_dmabuf_skip_iommu_count = ATOMIC64_INIT(0);
+static atomic64_t nv_dmabuf_topology_reject_count = ATOMIC64_INIT(0);
+static atomic64_t nv_dmabuf_no_struct_page_reject_count = ATOMIC64_INIT(0);
+static atomic64_t nv_dmabuf_map_fail_count = ATOMIC64_INIT(0);
+
+static int nv_dmabuf_counter_get(char *buffer, const struct kernel_param *kp)
+{
+    return scnprintf(buffer, PAGE_SIZE, "%lld\n",
+                     (long long)atomic64_read((atomic64_t *)kp->arg));
+}
+
+static const struct kernel_param_ops nv_dmabuf_counter_ops = {
+    .get = nv_dmabuf_counter_get,
+};
+
+module_param_cb(dmabuf_export_count, &nv_dmabuf_counter_ops, &nv_dmabuf_export_count, 0444);
+module_param_cb(dmabuf_force_pcie_count, &nv_dmabuf_counter_ops, &nv_dmabuf_force_pcie_count, 0444);
+module_param_cb(dmabuf_attach_count, &nv_dmabuf_counter_ops, &nv_dmabuf_attach_count, 0444);
+module_param_cb(dmabuf_map_pfns_count, &nv_dmabuf_counter_ops, &nv_dmabuf_map_pfns_count, 0444);
+module_param_cb(dmabuf_map_pages_count, &nv_dmabuf_counter_ops, &nv_dmabuf_map_pages_count, 0444);
+module_param_cb(dmabuf_skip_iommu_count, &nv_dmabuf_counter_ops, &nv_dmabuf_skip_iommu_count, 0444);
+module_param_cb(dmabuf_topology_reject_count, &nv_dmabuf_counter_ops, &nv_dmabuf_topology_reject_count, 0444);
+module_param_cb(dmabuf_no_struct_page_reject_count, &nv_dmabuf_counter_ops, &nv_dmabuf_no_struct_page_reject_count, 0444);
+module_param_cb(dmabuf_map_fail_count, &nv_dmabuf_counter_ops, &nv_dmabuf_map_fail_count, 0444);
 
 #if defined(CONFIG_DMA_SHARED_BUFFER)
 
@@ -807,6 +840,8 @@ nv_dma_buf_map_pages (
     NvBool pagemap_ref = NV_FALSE;
     int rc;
 
+    atomic64_inc(&nv_dmabuf_map_pages_count);
+
     nents = nv_dma_buf_get_sg_count(dev, priv, &dma_max_seg_size);
 
     NV_KZALLOC(sgt, sizeof(struct sg_table));
@@ -928,6 +963,8 @@ nv_dma_buf_map_pfns (
     NvU32 nents;
     int rc = 0;
 
+    atomic64_inc(&nv_dmabuf_map_pfns_count);
+
     peer_dma_dev.dev = dev;
     peer_dma_dev.addressable_range.limit = (NvU64)dev->dma_mask;
 
@@ -1027,6 +1064,8 @@ nv_dma_buf_attach(
 
     mutex_lock(&priv->lock);
 
+    atomic64_inc(&nv_dmabuf_attach_count);
+
     if (priv->mapping_type == NV_DMABUF_EXPORT_MAPPING_TYPE_FORCE_PCIE)
     {
         if(!nv_pci_is_valid_topology_for_direct_pci(priv->nv,
@@ -1035,11 +1074,15 @@ nv_dma_buf_attach(
             nv_printf(NV_DBG_ERRORS,
                       "NVRM: dma-buf attach failed: "
                       "topology not supported for mapping type FORCE_PCIE\n");
+            atomic64_inc(&nv_dmabuf_topology_reject_count);
+            pr_info_ratelimited("nv-dmabuf: topology reject: importer=%s reason=force_pcie_topology_invalid\n",
+                                dev_name(attachment->dev));
             rc = -ENOTSUPP;
             goto unlock_priv;
         }
 
         priv->skip_iommu = NV_TRUE;
+        atomic64_inc(&nv_dmabuf_skip_iommu_count);
     }
     else
     {
@@ -1053,6 +1096,9 @@ nv_dma_buf_attach(
             nv_printf(NV_DBG_ERRORS,
                       "NVRM: dma-buf attach failed: "
                       "PCI topology not supported for dma-buf\n");
+            atomic64_inc(&nv_dmabuf_topology_reject_count);
+            pr_info_ratelimited("nv-dmabuf: topology reject: importer=%s reason=pci_topology_unsupported\n",
+                                dev_name(attachment->dev));
             rc = -ENOTSUPP;
             goto unlock_priv;
         }
@@ -1066,6 +1112,9 @@ nv_dma_buf_attach(
         nv_printf(NV_DBG_ERRORS,
                   "NVRM: dma-buf attach failed: "
                   "importer unable to handle MMIO without struct page\n");
+        atomic64_inc(&nv_dmabuf_no_struct_page_reject_count);
+        pr_info_ratelimited("nv-dmabuf: topology reject: importer=%s reason=no_struct_page_p2p\n",
+                            dev_name(attachment->dev));
         rc = -ENOTSUPP;
         goto unlock_priv;
     }
@@ -1128,6 +1177,7 @@ nv_dma_buf_map(
     }
     if (IS_ERR(sgt))
     {
+        atomic64_inc(&nv_dmabuf_map_fail_count);
         goto unmap_handles;
     }
 
@@ -1597,6 +1647,11 @@ nv_dma_buf_create(
     priv->skip_iommu           = NV_FALSE;
     priv->map_attrs.allow_mmap = params->bAllowMmap;
 
+    if (priv->mapping_type == NV_DMABUF_EXPORT_MAPPING_TYPE_FORCE_PCIE)
+    {
+        atomic64_inc(&nv_dmabuf_force_pcie_count);
+    }
+
     rc = nv_kmem_cache_alloc_stack(&sp);
     if (rc != 0)
     {
@@ -1823,6 +1878,8 @@ nv_dma_buf_export(
 {
 #if defined(CONFIG_DMA_SHARED_BUFFER)
     NV_STATUS status;
+
+    atomic64_inc(&nv_dmabuf_export_count);
 
     if ((params == NULL) ||
         (params->totalSize == 0) ||

@@ -42,6 +42,32 @@
 #include "nv-p2p.h"
 #include "peer_mem.h"
 #include "conftest.h"
+#include <linux/atomic.h>
+
+/* GPUDirect RDMA checkpoint transport instrumentation (Track 4) */
+static atomic64_t nv_peermem_get_pages_count = ATOMIC64_INIT(0);
+static atomic64_t nv_peermem_get_pages_fail_count = ATOMIC64_INIT(0);
+static atomic64_t nv_peermem_dma_map_count = ATOMIC64_INIT(0);
+static atomic64_t nv_peermem_dma_map_fail_count = ATOMIC64_INIT(0);
+static atomic64_t nv_peermem_put_pages_count = ATOMIC64_INIT(0);
+static atomic64_t nv_peermem_topology_reject_count = ATOMIC64_INIT(0);
+
+static int nv_peermem_counter_get(char *buffer, const struct kernel_param *kp)
+{
+    return scnprintf(buffer, PAGE_SIZE, "%lld\n",
+                     (long long)atomic64_read((atomic64_t *)kp->arg));
+}
+
+static const struct kernel_param_ops nv_peermem_counter_ops = {
+    .get = nv_peermem_counter_get,
+};
+
+module_param_cb(peermem_get_pages_count, &nv_peermem_counter_ops, &nv_peermem_get_pages_count, 0444);
+module_param_cb(peermem_get_pages_fail_count, &nv_peermem_counter_ops, &nv_peermem_get_pages_fail_count, 0444);
+module_param_cb(peermem_dma_map_count, &nv_peermem_counter_ops, &nv_peermem_dma_map_count, 0444);
+module_param_cb(peermem_dma_map_fail_count, &nv_peermem_counter_ops, &nv_peermem_dma_map_fail_count, 0444);
+module_param_cb(peermem_put_pages_count, &nv_peermem_counter_ops, &nv_peermem_put_pages_count, 0444);
+module_param_cb(peermem_topology_reject_count, &nv_peermem_counter_ops, &nv_peermem_topology_reject_count, 0444);
 
 #define DRV_NAME    "nv_mem"
 #define DRV_VERSION NV_VERSION_STRING
@@ -309,20 +335,28 @@ static int nv_dma_map(struct sg_table *sg_head, void *context,
     struct nvidia_p2p_dma_mapping *dma_mapping;
     struct pci_dev *pdev = to_pci_dev(dma_device);
 
+    atomic64_inc(&nv_peermem_dma_map_count);
+
     if (page_table->page_size != NVIDIA_P2P_PAGE_SIZE_64KB) {
         peer_err("nv_dma_map -- assumption of 64KB pages failed size_id=%u\n",
                     nv_mem_context->page_table->page_size);
+        atomic64_inc(&nv_peermem_dma_map_fail_count);
         return -EINVAL;
     }
 
     if (!pdev) {
         peer_err("nv_dma_map -- invalid pci_dev\n");
+        atomic64_inc(&nv_peermem_dma_map_fail_count);
         return -EINVAL;
     }
 
     ret = nvidia_p2p_dma_map_pages(pdev, page_table, &dma_mapping);
     if (ret) {
         peer_err("nv_dma_map -- error %d while calling nvidia_p2p_dma_map_pages()\n", ret);
+        atomic64_inc(&nv_peermem_dma_map_fail_count);
+        atomic64_inc(&nv_peermem_topology_reject_count);
+        pr_info_ratelimited("nv-peermem: dma_map_pages failed: pdev=%s ret=%d (possible topology reject)\n",
+                            pci_name(pdev), ret);
         return ret;
     }
 
@@ -393,6 +427,8 @@ static void nv_mem_put_pages_common(int nc,
         return;
     }
 
+    atomic64_inc(&nv_peermem_put_pages_count);
+
     if (WARN_ON(0 != memcmp(sg_head, &nv_mem_context->sg_head, sizeof(*sg_head))))
         return;
 
@@ -462,6 +498,8 @@ static int nv_mem_get_pages(unsigned long addr,
     if (!nv_mem_context)
         return -EINVAL;
 
+    atomic64_inc(&nv_peermem_get_pages_count);
+
     nv_mem_context->core_context = core_context;
     nv_mem_context->page_size = GPU_PAGE_SIZE;
 
@@ -469,6 +507,7 @@ static int nv_mem_get_pages(unsigned long addr,
                                &nv_mem_context->page_table, nv_get_p2p_free_callback, nv_mem_context);
     if (ret < 0) {
         peer_err("error %d while calling nvidia_p2p_get_pages()\n", ret);
+        atomic64_inc(&nv_peermem_get_pages_fail_count);
         return ret;
     }
 
@@ -511,6 +550,8 @@ static int nv_mem_get_pages_nc(unsigned long addr,
     if (!nv_mem_context)
         return -EINVAL;
 
+    atomic64_inc(&nv_peermem_get_pages_count);
+
     nv_mem_context->core_context = core_context;
     nv_mem_context->page_size = GPU_PAGE_SIZE;
 
@@ -525,6 +566,7 @@ static int nv_mem_get_pages_nc(unsigned long addr,
 
     if (ret < 0) {
         peer_err("error %d while calling nvidia_p2p_get_pages() with NULL callback\n", ret);
+        atomic64_inc(&nv_peermem_get_pages_fail_count);
         return ret;
     }
 
