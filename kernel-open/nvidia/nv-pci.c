@@ -2942,26 +2942,41 @@ NvBool NV_API_CALL nv_grdma_pci_topology_supported(
     nv_dma_device_t *dma_peer
 )
 {
+    NvBool result;
+
     //
     // Skip topo check on coherent platforms since
     // NIC can map over C2C anyway and PCIe topology shouldn't matter.
     //
     if (nv->coherent)
     {
+        pr_info("nv-dmabuf: topo_check: PASS (coherent/C2C) peer=%s\n",
+                dev_name(dma_peer->dev));
         return NV_TRUE;
     }
 
     // Allow RDMA by default on passthrough VMs.
     if ((nv->flags & NV_FLAG_PASSTHRU) != 0)
+    {
+        pr_info("nv-dmabuf: topo_check: PASS (passthrough VM) peer=%s flags=0x%x\n",
+                dev_name(dma_peer->dev), nv->flags);
         return NV_TRUE;
+    }
 
     //
     // Only allow RDMA on unsupported chipsets if there exists
     // a common PCI switch between the GPU and the other device
     //
     if ((nv->flags & NV_FLAG_PCI_P2P_UNSUPPORTED_CHIPSET) != 0)
-        return nv_pci_has_common_pci_switch(nv, to_pci_dev(dma_peer->dev));
+    {
+        result = nv_pci_has_common_pci_switch(nv, to_pci_dev(dma_peer->dev));
+        pr_info("nv-dmabuf: topo_check: %s (unsupported_chipset, common_switch=%d) peer=%s\n",
+                result ? "PASS" : "FAIL", result, dev_name(dma_peer->dev));
+        return result;
+    }
 
+    pr_info("nv-dmabuf: topo_check: PASS (default) peer=%s flags=0x%x coherent=%d\n",
+            dev_name(dma_peer->dev), nv->flags, nv->coherent);
     return NV_TRUE;
 }
 

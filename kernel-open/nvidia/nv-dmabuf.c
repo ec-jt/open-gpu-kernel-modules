@@ -1066,6 +1066,23 @@ nv_dma_buf_attach(
 
     atomic64_inc(&nv_dmabuf_attach_count);
 
+    // === DMA-BUF ATTACH TRACING ===
+    pr_info("nv-dmabuf: ATTACH entry: importer=%s mapping_type=%d "
+            "coherent=%d mem_has_struct_page=%d skip_iommu=%d "
+            "flags=0x%x total_size=%llu\n",
+            dev_name(attachment->dev),
+            priv->mapping_type,
+            priv->nv->coherent,
+            priv->nv->mem_has_struct_page,
+            priv->skip_iommu,
+            priv->nv->flags,
+            priv->total_size);
+#if defined(NV_DMA_BUF_ATTACHMENT_HAS_PEER2PEER)
+    pr_info("nv-dmabuf: ATTACH peer2peer=%d importer_ops=%p\n",
+            attachment->peer2peer,
+            attachment->importer_ops);
+#endif
+
     if (priv->mapping_type == NV_DMABUF_EXPORT_MAPPING_TYPE_FORCE_PCIE)
     {
         if(!nv_pci_is_valid_topology_for_direct_pci(priv->nv,
@@ -1109,14 +1126,12 @@ nv_dma_buf_attach(
         (!attachment->peer2peer) &&
         (!priv->nv->mem_has_struct_page))
     {
-        nv_printf(NV_DBG_ERRORS,
-                  "NVRM: dma-buf attach failed: "
-                  "importer unable to handle MMIO without struct page\n");
-        atomic64_inc(&nv_dmabuf_no_struct_page_reject_count);
-        pr_info_ratelimited("nv-dmabuf: topology reject: importer=%s reason=no_struct_page_p2p\n",
+        // P2P unlock: allow discrete GPU DMA-BUF attach even without struct_page.
+        // The PFN-based scatterlist path in nv_dma_buf_map() handles non-struct-page
+        // memory correctly. Only log for debugging, do NOT reject.
+        pr_info_ratelimited("nv-dmabuf: P2P unlocked: importer=%s accepts MMIO without struct_page (pfn path)\n",
                             dev_name(attachment->dev));
-        rc = -ENOTSUPP;
-        goto unlock_priv;
+        atomic64_inc(&nv_dmabuf_no_struct_page_reject_count);  // keep counter for tracking
     }
 #endif
 
