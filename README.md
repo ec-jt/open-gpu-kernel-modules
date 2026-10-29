@@ -26,5 +26,8 @@ and zero POSIX fallback. The service was manually started on the running
 patched driver; a fresh provisioning/reboot cycle has not been tested.
 
 The prototype supports one synchronous VMM buffer and one GPU per process.
-Application/inference integration and GPU-direct RDMA over Mellanox remain
-separate work; see the detailed GDS README for scope and version pins.
+A separate [DMA-BUF RDMA prototype](tools/geforce-dmabuf/README.md) now passes
+local hardware RDMA READ/WRITE integrity tests on all eight GPUs through the
+two active mlx5 adapters, without nvidia-peermem or NV503C registration.
+Inter-node testing and application/inference integration remain separate
+work; see each prototype README for scope and version pins.

@@ -124,3 +124,14 @@ namespace { int selected_device = -1; }
 bool nv503c_ready() noexcept { return p2p && va_registered && mem_registered; }
 void nv503c_set_device(int device) noexcept { selected_device=device; }
 int nv503c_device() noexcept { return selected_device; }
+// DMA-BUF can export this captured allocation without creating an NV503C object.
+CapturedGpuMemory nv503c_captured_memory() {
+    CapturedGpuMemory result{}; unsigned matches=0;
+    for(unsigned i=0;i<captured_count;++i) {
+        if(captured[i].cls==0x40) {
+            result={captured[i].client,captured[i].object}; ++matches;
+        }
+    }
+    if(matches!=1) throw std::runtime_error("Expected exactly one captured VMM memory object");
+    return result;
+}

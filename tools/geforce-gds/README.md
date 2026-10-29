@@ -102,16 +102,15 @@ modern route and does not need nvidia-peermem**. The mlx5 driver registers a
 CUDA-exported DMA-BUF using `ibv_reg_dmabuf_mr`. nvidia-fs is the separate
 storage backend used by this prototype.
 
-On the tested server, perftest has `--use_cuda_dmabuf` and
-`--use_cuda_pcie_mapping`, but a direct local probe on GPUs 0 and 4 reported
-`CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED=0`. Exporting a 64 KiB cuMemAlloc
-buffer through `cuMemGetHandleForAddressRange` returned
-`CUDA_ERROR_NOT_SUPPORTED` (801), with both default flags and explicit PCIe
-BAR1 mapping. No DMA-BUF FD was produced, so NIC registration and network
-transfers were not tested. This result concerns the ordinary cuMemAlloc
-export path, not every possible VMM/NV503C integration. The branch retains
-the GeForce BAR1 changes but does not yet implement or validate a GeForce
-DMA-BUF RDMA export workaround. GDS success is not an RDMA test.
+The ordinary CUDA DMA-BUF export API returns `CUDA_ERROR_NOT_SUPPORTED` on
+the tested 5090s. Further testing found a working userspace route: capture a
+VMM allocation's RM handles, export them through the existing kernel
+DMA-BUF ioctl, and register the FD with mlx5. The
+[DMA-BUF prototype](../geforce-dmabuf/README.md) passed local NIC RDMA READ
+and WRITE byte checks on all eight GPUs through both active adapters.
+It requires neither nvidia-peermem nor NV503C registration. Inter-node
+transfers and inference integration remain untested. The GDS and DMA-BUF
+prototypes share allocation-handle capture; their I/O backends are separate.
 
 The installer backs up managed runtime/module/config files, stages the
 runtime at `/opt/geforce-gds-prototype`, and enables
