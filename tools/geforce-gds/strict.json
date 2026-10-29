@@ -1,0 +1,8 @@
+{
+  "properties": {
+    "allow_compat_mode": false,
+    "force_compat_mode": false
+  },
+  "logging": {"level": "TRACE"},
+  "profile": {"cufile_stats": 3}
+}

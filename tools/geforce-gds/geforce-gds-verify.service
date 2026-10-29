@@ -1,0 +1,13 @@
+[Unit]
+Description=Verify experimental GeForce GPUDirect Storage reads
+After=local-fs.target systemd-modules-load.service
+ConditionPathExists=/var/lib/geforce-gds-prototype/pending
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/geforce-gds-prototype
+ExecStart=/bin/bash /opt/geforce-gds-prototype/verify-boot.sh
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
