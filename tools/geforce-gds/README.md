@@ -96,11 +96,22 @@ cd open-gpu-kernel-modules
 ```
 
 `install.sh` builds the GDS components before installing the driver. It
-excludes nvidia-peermem, as the existing deployment did: **that means Mellanox
-GPUDirect RDMA is not installed by this workflow**. nvidia-fs and nvidia-peermem
-serve different backends. RDMA additionally needs a compatible peer-memory
-provider (or validated DMA-BUF route), NIC stack, and application registration.
-The GeForce BAR1 kernel changes are retained; GDS success is not an RDMA test.
+excludes legacy nvidia-peermem, as the existing deployment did. Its absence
+is not evidence that GPUDirect RDMA cannot work: **DMA-BUF is the preferred
+modern route and does not need nvidia-peermem**. The mlx5 driver registers a
+CUDA-exported DMA-BUF using `ibv_reg_dmabuf_mr`. nvidia-fs is the separate
+storage backend used by this prototype.
+
+On the tested server, perftest has `--use_cuda_dmabuf` and
+`--use_cuda_pcie_mapping`, but a direct local probe on GPUs 0 and 4 reported
+`CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED=0`. Exporting a 64 KiB cuMemAlloc
+buffer through `cuMemGetHandleForAddressRange` returned
+`CUDA_ERROR_NOT_SUPPORTED` (801), with both default flags and explicit PCIe
+BAR1 mapping. No DMA-BUF FD was produced, so NIC registration and network
+transfers were not tested. This result concerns the ordinary cuMemAlloc
+export path, not every possible VMM/NV503C integration. The branch retains
+the GeForce BAR1 changes but does not yet implement or validate a GeForce
+DMA-BUF RDMA export workaround. GDS success is not an RDMA test.
 
 The installer backs up managed runtime/module/config files, stages the
 runtime at `/opt/geforce-gds-prototype`, and enables
