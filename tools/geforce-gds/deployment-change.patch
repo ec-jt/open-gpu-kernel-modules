@@ -1,0 +1,35 @@
+--- a/install-p2p-kernel.sh
++++ b/install-p2p-kernel.sh
+@@ -13,15 +13,15 @@
+ #cd open-gpu-kernel-modules
+ #git checkout 580.105.08-p2p
+ # 595.45.04 P2P+NVFBC kernel module
+-git clone https://github.com/aikitoria/open-gpu-kernel-modules.git
++git clone --branch 615.78.08-gds --single-branch https://github.com/ec-jt/open-gpu-kernel-modules.git || exit 1
+ cd open-gpu-kernel-modules
+-git checkout 610.43.02-p2p
++git checkout 615.78.08-gds || exit 1
+ if [ -d kernel-open/nvidia-peermem ]; then
+   mv kernel-open/nvidia-peermem kernel-open/nvidia-peermem.disabled
+ else
+   echo "nvidia-peermem not present; skipping disable step."
+ fi
+-./install.sh
++./install.sh || exit 1
+ [ -d kernel-open/nvidia-peermem.disabled ] && mv kernel-open/nvidia-peermem.disabled kernel-open/nvidia-peermem || true
+ # Reload nvidia kernel modules to pick up 610.43.02
+ echo "=== Unloading old nvidia modules ==="; \
+@@ -40,9 +40,12 @@
+ nvidia-smi topo -m
+ set -e
+ cd ..
+-git clone https://github.com/ec-jt/nvidia-patch
++if [ ! -d nvidia-patch/.git ]; then
++  git clone https://github.com/ec-jt/nvidia-patch
++fi
+ cd nvidia-patch
+ ./patch.sh
+ ./patch-fbc.sh
+ cd ..
++rm -f /home/ubuntu/run-install-p2p-kernel
+ reboot
